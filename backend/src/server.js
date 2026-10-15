@@ -14,6 +14,7 @@ const jobRoutes = require("./routes/jobs");
 const applicationRoutes = require("./routes/applications");
 const interviewRoutes = require("./routes/interviews");
 const aiRoutes = require("./routes/ai");
+const authRoutes = require("./routes/auth");
 
 // Middleware
 app.use(helmet());
@@ -26,6 +27,7 @@ app.use("/api/jobs", jobRoutes);
 app.use("/api/applications", applicationRoutes);
 app.use("/api/interviews", interviewRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/auth", authRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

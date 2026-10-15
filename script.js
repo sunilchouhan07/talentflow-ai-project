@@ -72,10 +72,12 @@ async function loadBackendData() {
         rejected: "Rejected",
       };
 
+      
       return {
         id: Number(c.id),
         name: c.full_name,
         email: c.email,
+        resumeUrl: c.resume_url || null,
         role: c.applied_role || c.role || "Not specified",
         experience:
           c.experience_years == null
@@ -86,6 +88,7 @@ async function loadBackendData() {
         applied: c.created_at?.slice(0, 10) || "",
         source: c.source || "Website",
       };
+
     });
 
     data.jobs = (jobResult.jobs || []).map((j) => ({
@@ -165,23 +168,153 @@ function to24HourTime(value) {
 
 function stageClass(stage){return stage.toLowerCase().replace(/\s/g,'-')}
 
-function initAuth(){
- if(currentUser){$('authScreen').classList.add('hidden');$('app').classList.remove('hidden');updateUserUI();renderAll();}
- $('showRegister').onclick=()=>{$('loginPanel').classList.add('hidden');$('registerPanel').classList.remove('hidden')};
- $('showLogin').onclick=()=>{$('registerPanel').classList.add('hidden');$('loginPanel').classList.remove('hidden')};
- document.querySelectorAll('.password-toggle').forEach(btn=>btn.onclick=()=>{const input=$(btn.dataset.target);input.type=input.type==='password'?'text':'password';btn.textContent=input.type==='password'?'Show':'Hide'});
- $('loginForm').onsubmit=e=>{e.preventDefault();const email=$('loginEmail').value.trim(),pass=$('loginPassword').value;if(email==='admin@talentflowai.com'&&pass==='Admin@123'){currentUser={name:'Admin',email};localStorage.setItem(SESSION_KEY,JSON.stringify(currentUser));$('authScreen').classList.add('hidden');$('app').classList.remove('hidden');updateUserUI();renderAll();showToast('Welcome to TalentFlow AI')}else showToast('Create account')};
- $('registerForm').onsubmit=e=>{e.preventDefault();if($('registerPassword').value!==$('registerConfirmPassword').value)return showToast('Passwords do not match');currentUser={name:$('registerFirstName').value+' '+$('registerLastName').value,email:$('registerEmail').value};localStorage.setItem(SESSION_KEY,JSON.stringify(currentUser));$('authScreen').classList.add('hidden');$('app').classList.remove('hidden');updateUserUI();renderAll();showToast('Account created successfully')};
- $('forgotPassword').onclick=()=>showToast('Password reset instructions would be sent to your email.');
+
+function initAuth() {
+  // A frontend session without a backend JWT is not authenticated.
+  if (!localStorage.getItem("talentflow_token")) {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem("talentflow_user");
+    currentUser = null;
+  }
+
+  if (currentUser) {
+    $("authScreen").classList.add("hidden");
+    $("app").classList.remove("hidden");
+    updateUserUI();
+    renderAll();
+  } else {
+    $("authScreen").classList.remove("hidden");
+    $("app").classList.add("hidden");
+  }
+
+  $("showRegister").onclick = () => {
+    $("loginPanel").classList.add("hidden");
+    $("registerPanel").classList.remove("hidden");
+  };
+
+  $("showLogin").onclick = () => {
+    $("registerPanel").classList.add("hidden");
+    $("loginPanel").classList.remove("hidden");
+  };
+
+  document.querySelectorAll(".password-toggle").forEach((btn) => {
+    btn.onclick = () => {
+      const input = $(btn.dataset.target);
+      input.type = input.type === "password" ? "text" : "password";
+      btn.textContent = input.type === "password" ? "Show" : "Hide";
+    };
+  });
+
+  $("loginForm").onsubmit = async (e) => {
+    e.preventDefault();
+
+    const email = $("loginEmail").value.trim();
+    const password = $("loginPassword").value;
+    const button = $("loginForm").querySelector('[type="submit"]');
+
+    if (button) button.disabled = true;
+
+    try {
+      const result = await window.TalentFlowAPI.login(email, password);
+      const user = result.user;
+
+      currentUser = {
+        id: user.id,
+        name: user.full_name,
+        email: user.email,
+        role: user.role,
+      };
+
+      localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
+
+      $("authScreen").classList.add("hidden");
+      $("app").classList.remove("hidden");
+
+      updateUserUI();
+      renderAll();
+      showToast("Welcome to TalentFlow AI");
+    } catch (error) {
+      showToast(error.message || "Login failed");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  };
+
+  $("registerForm").onsubmit = async (e) => {
+    e.preventDefault();
+
+    const firstName = $("registerFirstName").value.trim();
+    const lastName = $("registerLastName").value.trim();
+    const email = $("registerEmail").value.trim();
+    const password = $("registerPassword").value;
+    const confirmPassword = $("registerConfirmPassword").value;
+    const button = $("registerForm").querySelector('[type="submit"]');
+
+    if (!firstName || !lastName || !email || !password) {
+      showToast("Please complete all required fields");
+      return;
+    }
+
+    if (password.length < 8) {
+      showToast("Password must be at least 8 characters");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      showToast("Passwords do not match");
+      return;
+    }
+
+    if (button) button.disabled = true;
+
+    try {
+      await window.TalentFlowAPI.register(
+        `${firstName} ${lastName}`,
+        email,
+        password
+      );
+
+      $("registerForm").reset();
+      $("showLogin").click();
+      $("loginEmail").value = email;
+
+      showToast("Account created. Please log in.");
+    } catch (error) {
+      showToast(error.message || "Registration failed");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  };
+
+  $("forgotPassword").onclick = () =>
+    showToast("Password reset is not available yet.");
 }
-function updateUserUI(){const u=currentUser||{name:'Admin',email:'admin@talentflowai.com'};$('sidebarUserName').textContent=u.name;$('sidebarUserEmail').textContent=u.email;$('sidebarAvatar').textContent=initials(u.name);$('welcomeName').textContent=u.name.split(' ')[0]}
+
+
+function updateUserUI() {
+  if (!currentUser) return;
+
+  const name = currentUser.name || currentUser.full_name || "User";
+  const email = currentUser.email || "";
+
+  $("sidebarUserName").textContent = name;
+  $("sidebarUserEmail").textContent = email;
+  $("sidebarAvatar").textContent = initials(name);
+  $("welcomeName").textContent = name.split(" ")[0];
+}
+
 
 function initNavigation(){
  document.querySelectorAll('.nav-item[data-page]').forEach(btn=>btn.onclick=()=>navigate(btn.dataset.page));
  document.querySelectorAll('[data-page-link]').forEach(btn=>btn.onclick=()=>navigate(btn.dataset.pageLink));
  $('mobileMenu').onclick=()=>{$('sidebar').classList.toggle('open');$('sidebarOverlay').classList.toggle('open')};
  $('sidebarOverlay').onclick=()=>{$('sidebar').classList.remove('open');$('sidebarOverlay').classList.remove('open')};
- $('logoutButton').onclick=()=>{localStorage.removeItem(SESSION_KEY);location.reload()};
+$("logoutButton").onclick = () => {
+  window.TalentFlowAPI.logout();
+  localStorage.removeItem(SESSION_KEY);
+  currentUser = null;
+  location.reload();
+};
 }
 function navigate(page){document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));const target=$('page-'+page);if(target)target.classList.add('active');document.querySelectorAll('.nav-item[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));const titles={dashboard:'Recruitment Dashboard',candidates:'Candidates',applications: "Applications",jobs:'Job Openings',interviews:'Scheduled Interviews',pipeline:'Candidate Pipeline',analytics:'Recruitment Analytics',settings:'Settings'};$('pageTitle').textContent=titles[page]||'TalentFlow AI';$('sidebar').classList.remove('open');$('sidebarOverlay').classList.remove('open');renderAll()}
 
@@ -236,6 +369,13 @@ function renderDashboard() {
           <button class="link-button" data-candidate="${c.id}">
             View
           </button>
+          <button
+            type="button"
+            data-delete-candidate="${c.id}"
+            class="danger-button"
+          >
+            Delete
+          </button>
         </td>
       </tr>
     `)
@@ -244,12 +384,55 @@ function renderDashboard() {
   bindCandidateButtons();
 }
 
-function renderCandidates(){
- const q=($('candidateSearch').value||'').toLowerCase(),status=$('candidateStatusFilter').value,role=$('candidateRoleFilter').value,sort=$('candidateSort').value;
- let arr=data.candidates.filter(c=>(!q||`${c.name} ${c.email} ${c.role}`.toLowerCase().includes(q))&&(status==='all'||c.stage===status)&&(role==='all'||c.role===role));
- if(sort==='score')arr.sort((a,b)=>b.score-a.score);if(sort==='name')arr.sort((a,b)=>a.name.localeCompare(b.name));if(sort==='recent')arr.sort((a,b)=>b.applied.localeCompare(a.applied));
- $('candidateResultCount').textContent=`${arr.length} candidate${arr.length!==1?'s':''}`;$('candidateTableBody').innerHTML=arr.map(c=>`<tr><td><strong>${esc(c.name)}</strong><br><small>${esc(c.email)}</small></td><td>${esc(c.role)}</td><td>${esc(c.experience)}</td><td><strong>${c.score}%</strong></td><td><span class="tag">${esc(c.stage)}</span></td><td>${fmtDate(c.applied)}</td><td><button class="link-button" data-candidate="${c.id}">View</button></td></tr>`).join('');bindCandidateButtons();
+
+function renderCandidates() {
+  const q = ($("candidateSearch").value || "").toLowerCase();
+  const status = $("candidateStatusFilter").value;
+  const role = $("candidateRoleFilter").value;
+  const sort = $("candidateSort").value;
+
+  let arr = data.candidates.filter(c =>
+    (!q || `${c.name} ${c.email} ${c.role}`.toLowerCase().includes(q)) &&
+    (status === "all" || c.stage === status) &&
+    (role === "all" || c.role === role)
+  );
+
+  if (sort === "score") arr.sort((a, b) => b.score - a.score);
+  if (sort === "name") arr.sort((a, b) => a.name.localeCompare(b.name));
+  if (sort === "recent") arr.sort((a, b) => b.applied.localeCompare(a.applied));
+
+  $("candidateResultCount").textContent =
+    `${arr.length} candidate${arr.length !== 1 ? "s" : ""}`;
+
+  $("candidateTableBody").innerHTML = arr.map(c => `
+    <tr>
+      <td>
+        <strong>${esc(c.name)}</strong><br>
+        <small>${esc(c.email)}</small>
+      </td>
+      <td>${esc(c.role)}</td>
+      <td>${esc(c.experience)}</td>
+      <td><strong>${c.score}%</strong></td>
+      <td><span class="tag">${esc(c.stage)}</span></td>
+      <td>${fmtDate(c.applied)}</td>
+      <td>
+        <button class="link-button" data-candidate="${c.id}">
+          View
+        </button>
+        <button
+          class="danger-button"
+          type="button"
+          data-delete-candidate="${c.id}"
+        >
+          Delete
+        </button>
+      </td>
+    </tr>
+  `).join("");
+
+  bindCandidateButtons();
 }
+
 
 
 function renderJobs() {
@@ -271,11 +454,56 @@ function renderJobs() {
       >
         Edit Job
       </button>
+
+      <button
+        class="danger-button"
+        type="button"
+        data-delete-job="${j.id}"
+      >
+        Delete Job
+      </button>
     </div>
   `).join("");
 
   document.querySelectorAll("[data-edit-job]").forEach(button => {
     button.onclick = () => editJob(Number(button.dataset.editJob));
+  });
+
+  document.querySelectorAll("[data-delete-job]").forEach(button => {
+    button.onclick = async () => {
+      const id = Number(button.dataset.deleteJob);
+      const job = data.jobs.find(j => Number(j.id) === id);
+
+      if (!job) {
+        showToast("Job not found");
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `Permanently delete "${job.title}"? Jobs with applications cannot be deleted.`
+      );
+
+      if (!confirmed) return;
+
+      button.disabled = true;
+
+      try {
+        await window.TalentFlowAPI.deleteJob(id);
+
+        showToast("Job deleted successfully");
+
+        // Reload jobs from the backend and refresh the UI.
+        await loadBackendData();
+      }  catch (error) {
+        console.error("Delete job failed:", error);
+
+        showToast(
+          error.message || "Could not delete job. Please try again."
+        );
+      } finally {
+        button.disabled = false;
+      }
+    };
   });
 }
 
@@ -516,7 +744,46 @@ function renderAnalytics(){const stages=['Applied','Screening','Shortlisted','In
 function renderSettings(){$('settingAI').checked=data.settings.ai;$('settingNotifications').checked=data.settings.notifications;$('settingCompact').checked=data.settings.compact;document.body.classList.toggle('compact-tables',data.settings.compact)}
 function renderAll(){renderStats();renderDashboard();populateRoleFilter();renderCandidates();renderJobs();renderApplications();renderInterviews();renderPipeline();renderAnalytics();renderSettings()}
 function populateRoleFilter(){const select=$('candidateRoleFilter'),value=select.value,roles=[...new Set(data.candidates.map(c=>c.role))];select.innerHTML='<option value="all">All positions</option>'+roles.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');select.value=roles.includes(value)?value:'all'}
-function bindCandidateButtons(){document.querySelectorAll('[data-candidate]').forEach(b=>b.onclick=()=>openCandidate(+b.dataset.candidate))}
+
+function bindCandidateButtons() {
+  // Existing View button behavior
+  document.querySelectorAll('[data-candidate]').forEach((button) => {
+    button.onclick = () => openCandidate(+button.dataset.candidate);
+  });
+
+  // Delete candidate behavior
+  document.querySelectorAll('[data-delete-candidate]').forEach((button) => {
+    button.onclick = async () => {
+      const id = Number(button.dataset.deleteCandidate);
+
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        showToast("Invalid candidate ID");
+        return;
+      }
+
+      const confirmed = window.confirm(
+        "Permanently delete this candidate, their applications, interviews, and uploaded resume? This action cannot be undone."
+      );
+
+      if (!confirmed) return;
+
+      button.disabled = true;
+
+      try {
+        await window.TalentFlowAPI.deleteCandidate(id);
+        showToast("Candidate deleted successfully");
+
+        // Refresh the existing candidate list
+        await loadBackendData();
+      } catch (error) {
+        console.error("Delete candidate failed:", error);
+        showToast(`Could not delete candidate: ${error.message}`);
+      } finally {
+        button.disabled = false;
+      }
+    };
+  });
+}
 
 
 
@@ -589,6 +856,20 @@ async function openCandidate(id) {
           </button>
         </form>
 
+        
+        ${c.resumeUrl ? `
+          <button
+            class="primary-button"
+            type="button"
+            id="downloadCandidateResume"
+          >
+            Download Resume
+          </button>
+        ` : `
+          <p class="ai-main-text">No resume uploaded for this candidate.</p>
+        `}
+
+
         <hr style="border:0;border-top:1px solid var(--line);margin:20px 0">
 
         <label for="candidateStageEdit">Update hiring stage</label>
@@ -605,6 +886,42 @@ async function openCandidate(id) {
       </div>
     `
   );
+
+
+  
+const downloadButton = $("downloadCandidateResume");
+
+if (downloadButton) {
+  downloadButton.onclick = async () => {
+    const downloadTab = window.open("about:blank", "_blank");
+
+    downloadButton.disabled = true;
+    downloadButton.textContent = "Preparing download...";
+
+    try {
+      const result =
+        await window.TalentFlowAPI.getCandidateResume(id);
+
+      if (!result.downloadUrl) {
+        throw new Error("Download URL was not returned");
+      }
+
+      if (downloadTab) {
+        downloadTab.location.href = result.downloadUrl;
+      } else {
+        window.location.href = result.downloadUrl;
+      }
+    } catch (error) {
+      if (downloadTab) downloadTab.close();
+
+      console.error("Resume download failed:", error);
+      showToast(`Could not download resume: ${error.message}`);
+    } finally {
+      downloadButton.disabled = false;
+      downloadButton.textContent = "Download Resume";
+    }
+  };
+}
 
   // Save candidate profile
   $("editCandidateForm").onsubmit = async (e) => {
@@ -776,27 +1093,49 @@ function openInterview(id) {
 function openModal(kicker,title,body){$('modalKicker').textContent=kicker;$('modalTitle').textContent=title;$('modalBody').innerHTML=body;$('modalOverlay').classList.add('open')}
 function closeModal(){$('modalOverlay').classList.remove('open')}
 
+
 function addCandidate() {
   openModal(
     "TALENT POOL",
     "Add Candidate",
     `<form class="modal-form" id="candidateForm">
       <div>
-        <label>Name</label>
-        <input id="newName" required>
+        <label for="newName">Name</label>
+        <input id="newName" required maxlength="150">
       </div>
+
       <div>
-        <label>Email</label>
+        <label for="newEmail">Email</label>
         <input type="email" id="newEmail" required>
       </div>
+
       <div>
-        <label>Position</label>
-        <input id="newRole" required>
+        <label for="newRole">Position</label>
+        <input id="newRole" required maxlength="150">
       </div>
+
       <div>
-        <label>Experience (years)</label>
-        <input id="newExperience" type="number" min="0" step="0.5" required>
+        <label for="newExperience">Experience (years)</label>
+        <input
+          id="newExperience"
+          type="number"
+          min="0"
+          max="999.9"
+          step="0.1"
+          required
+        >
       </div>
+
+      <div>
+        <label for="newResume">Resume (PDF, DOC, DOCX)</label>
+        <input
+          id="newResume"
+          type="file"
+          accept=".pdf,.doc,.docx"
+        >
+        <small>Optional. Maximum size: 5 MB.</small>
+      </div>
+
       <button class="primary-button" type="submit">
         Add Candidate
       </button>
@@ -809,26 +1148,44 @@ function addCandidate() {
     const button = e.currentTarget.querySelector(
       'button[type="submit"]'
     );
+    const resume = $("newResume").files[0];
+
+    if (resume) {
+      const allowedTypes = [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ];
+
+      const allowedExtensions = /\.(pdf|doc|docx)$/i;
+
+      if (
+        resume.size > 5 * 1024 * 1024 ||
+        !allowedExtensions.test(resume.name) ||
+        !allowedTypes.includes(resume.type)
+      ) {
+        showToast("Choose a PDF, DOC, or DOCX file under 5 MB.");
+        return;
+      }
+    }
 
     button.disabled = true;
     button.textContent = "Saving...";
 
     try {
-      const experience = Number($("newExperience").value);
-
       await window.TalentFlowAPI.createCandidate({
         full_name: $("newName").value.trim(),
         email: $("newEmail").value.trim(),
         applied_role: $("newRole").value.trim(),
-        experience_years: experience,
+        experience_years: Number($("newExperience").value),
         status: "new",
         source: "Website",
+        resume,
       });
 
       await loadBackendData();
-
       closeModal();
-      showToast("Candidate saved to PostgreSQL!");
+      showToast("Candidate saved successfully!");
     } catch (error) {
       console.error("Failed to create candidate:", error);
       showToast(`Could not save candidate: ${error.message}`);
@@ -1107,24 +1464,8 @@ $("generateInsight").onclick = async () => {
   content.textContent = "Analyzing recruitment data...";
 
   try {
-    const response = await fetch(
-      "http://localhost:5000/api/ai/insights",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({})
-      }
-    );
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        result.error || "AI request failed"
-      );
-    }
+    
+const result = await window.TalentFlowAPI.getAIInsights();
 
     
 content.replaceChildren();

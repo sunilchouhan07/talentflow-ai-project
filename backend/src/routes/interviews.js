@@ -1,6 +1,7 @@
 
 const express = require("express");
 const pool = require("../config/db");
+const { authenticateToken, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -8,8 +9,8 @@ const validTypes = ["technical", "behavioral", "hr", "other"];
 const validStatuses = ["scheduled", "completed", "cancelled", "rescheduled"];
 
 // GET /api/interviews
-router.get("/", async (req, res) => {
-  try {
+router.get("/", authenticateToken, async (req, res) => {
+    try {
     const result = await pool.query(`
       SELECT
         i.id,
@@ -40,8 +41,12 @@ router.get("/", async (req, res) => {
 });
 
 // POST /api/interviews
-router.post("/", async (req, res) => {
-  const {
+router.post(
+  "/",
+  authenticateToken,
+  requireRole("admin", "recruiter", "hiring_manager"),
+  async (req, res) => {
+      const {
     application_id,
     scheduled_at,
     interview_type = "technical",
@@ -95,8 +100,12 @@ router.post("/", async (req, res) => {
 });
 
 // PATCH /api/interviews/:id
-router.patch("/:id", async (req, res) => {
-  const id = Number(req.params.id);
+router.patch(
+  "/:id",
+  authenticateToken,
+  requireRole("admin", "recruiter", "hiring_manager"),
+  async (req, res) => {
+      const id = Number(req.params.id);
 
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ error: "Invalid interview ID" });

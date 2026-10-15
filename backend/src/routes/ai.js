@@ -2,11 +2,16 @@
 const express = require("express");
 const Groq = require("groq-sdk");
 const pool = require("../config/db");
+const { authenticateToken, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 
-router.post("/insights", async (req, res) => {
-  try {
+router.post(
+  "/insights",
+  authenticateToken,
+  requireRole("admin", "recruiter", "hiring_manager"),
+  async (req, res) => {
+      try {
     // 1. Validate API configuration
     if (!process.env.GROQ_API_KEY) {
       return res.status(503).json({

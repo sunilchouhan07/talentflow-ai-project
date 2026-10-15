@@ -1,7 +1,7 @@
 
 const express = require("express");
 const pool = require("../config/db");
-
+const { authenticateToken, requireRole } = require("../middleware/auth");
 const router = express.Router();
 
 const validStages = [
@@ -20,8 +20,8 @@ function isObject(value) {
 }
 
 // GET /api/applications
-router.get("/", async (req, res) => {
-  try {
+router.get("/", authenticateToken, async (req, res) => {
+    try {
     const result = await pool.query(`
       SELECT
         a.id,
@@ -52,8 +52,12 @@ router.get("/", async (req, res) => {
 });
 
 // POST /api/applications
-router.post("/", async (req, res) => {
-  if (!isObject(req.body)) {
+router.post(
+  "/",
+  authenticateToken,
+  requireRole("admin", "recruiter", "hiring_manager"),
+  async (req, res) => {
+      if (!isObject(req.body)) {
     return res.status(400).json({
       error: "Request body must be a JSON object",
     });
@@ -158,8 +162,12 @@ router.post("/", async (req, res) => {
 });
 
 // PATCH /api/applications/:id/stage
-router.patch("/:id/stage", async (req, res) => {
-  const id = Number(req.params.id);
+router.patch(
+  "/:id/stage",
+  authenticateToken,
+  requireRole("admin", "recruiter", "hiring_manager"),
+  async (req, res) => {
+      const id = Number(req.params.id);
 
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({

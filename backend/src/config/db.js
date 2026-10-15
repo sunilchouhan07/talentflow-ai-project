@@ -1,3 +1,4 @@
+const fs = require("fs");
 const { Pool } = require("pg");
 
 const pool = new Pool({
@@ -6,10 +7,15 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-});
-
-pool.on("error", (err) => {
-  console.error("Unexpected PostgreSQL pool error:", err.message);
+  ssl: process.env.DB_SSL === "true"
+    ? {
+        ca: fs.readFileSync(
+          "/etc/pki/tls/certs/rds-global-bundle.pem",
+          "utf8"
+        ),
+        rejectUnauthorized: true,
+      }
+    : false,
 });
 
 module.exports = pool;

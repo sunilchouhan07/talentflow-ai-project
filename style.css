@@ -656,22 +656,27 @@ textarea:focus {
 }
 
 .logout-mini {
-  width: 30px;
-  height: 30px;
-
-  border: none;
-  border-radius: 7px;
-
-  background: #f8fafc;
-  color: #64748b;
-
-  transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 14px;
+    margin-top: 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #dc2626;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
 }
 
 .logout-mini:hover {
-  background: var(--danger-light);
-  color: var(--danger);
+    background: #fef2f2;
+    border-color: #fecaca;
 }
+
 
 /* =========================================================
    MAIN CONTENT

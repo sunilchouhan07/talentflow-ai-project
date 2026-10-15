@@ -14,15 +14,36 @@ const API_BASE_URL = (() => {
 async function apiRequest(path, options = {}) {
   let response;
 
+  // Never manually set Content-Type for FormData.
+  // The browser must add the multipart boundary automatically.
+  const isFormData =
+    typeof FormData !== "undefined" &&
+    options.body instanceof FormData;
+
+
+  const headers = { ...options.headers };
+
+  // Attach JWT to authenticated API requests.
+  const token = localStorage.getItem("talentflow_token");
+
+  if (token && !Object.keys(headers).some(
+    key => key.toLowerCase() === "authorization"
+  )) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  if (options.body !== undefined && !isFormData) {
+    if (!Object.keys(headers).some(
+      (key) => key.toLowerCase() === "content-type"
+    )) {
+      headers["Content-Type"] = "application/json";
+    }
+  }
+
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
-      headers: {
-        ...(options.body !== undefined
-          ? { "Content-Type": "application/json" }
-          : {}),
-        ...options.headers,
-      },
+      headers,
     });
   } catch (error) {
     console.error("API network request failed:", error);
@@ -32,12 +53,7 @@ async function apiRequest(path, options = {}) {
     );
   }
 
-  // Handle empty responses, including HTTP 204.
   if (response.status === 204) {
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
-
     return null;
   }
 
@@ -67,13 +83,75 @@ async function apiRequest(path, options = {}) {
 
 window.TalentFlowAPI = {
   // Candidates
+  
+
+register: (full_name, email, password) =>
+  apiRequest("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ full_name, email, password }),
+  }),
+
+login: async (email, password) => {
+  const result = await apiRequest("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+
+  localStorage.setItem("talentflow_token", result.token);
+  localStorage.setItem("talentflow_user", JSON.stringify(result.user));
+
+  return result;
+},
+
+logout: () => {
+  localStorage.removeItem("talentflow_token");
+  localStorage.removeItem("talentflow_user");
+},
+
+getAIInsights: () =>
+  apiRequest("/ai/insights", {
+    method: "POST",
+    body: JSON.stringify({}),
+  }),
+
+
+  // Candidates
   getCandidates: () => apiRequest("/candidates"),
 
-  createCandidate: (candidate) =>
-    apiRequest("/candidates", {
+  getCandidateResume: (id) =>
+    apiRequest(`/candidates/${id}/resume`),
+
+
+  createCandidate: (candidate) => {
+    const { resume, ...candidateData } = candidate;
+
+    // Existing JSON flow when no resume is selected
+    if (!resume) {
+      return apiRequest("/candidates", {
+        method: "POST",
+        body: JSON.stringify(candidateData),
+      });
+    }
+
+    // Multipart flow when a resume is selected
+    const formData = new FormData();
+
+    Object.entries(candidateData).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        formData.append(
+          key,
+          Array.isArray(value) ? JSON.stringify(value) : String(value)
+        );
+      }
+    });
+
+    formData.append("resume", resume);
+
+    return apiRequest("/candidates", {
       method: "POST",
-      body: JSON.stringify(candidate),
-    }),
+      body: formData,
+    });
+  },
 
   updateCandidate: (id, candidate) =>
     apiRequest(`/candidates/${id}`, {
@@ -85,6 +163,11 @@ window.TalentFlowAPI = {
     apiRequest(`/candidates/${id}/status`, {
       method: "PATCH",
       body: JSON.stringify({ stage }),
+    }),
+
+    deleteCandidate: (id) =>
+    apiRequest(`/candidates/${id}`, {
+      method: "DELETE",
     }),
 
   // Jobs
@@ -101,6 +184,13 @@ window.TalentFlowAPI = {
       method: "PATCH",
       body: JSON.stringify(job),
     }),
+
+  
+  deleteJob: (id) =>
+    apiRequest(`/jobs/${id}`, {
+      method: "DELETE",
+    }),
+
 
   // Applications
   getApplications: () => apiRequest("/applications"),

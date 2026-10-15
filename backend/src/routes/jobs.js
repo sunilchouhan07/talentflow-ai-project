@@ -1,6 +1,11 @@
 
 const express = require("express");
 const pool = require("../config/db");
+const {
+  authenticateToken,
+  requireRole,
+} = require("../middleware/auth");
+
 const { calculateMatchScore } = require("../utils/matchScore");
 
 const router = express.Router();
@@ -172,8 +177,12 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST /api/jobs — create a job
-router.post("/", async (req, res) => {
-  const body = req.body;
+router.post(
+  "/",
+  authenticateToken,
+  requireRole("admin", "recruiter"),
+  async (req, res) => {
+      const body = req.body;
   const validationError = validateJob(body);
 
   if (validationError) {
@@ -236,8 +245,12 @@ router.post("/", async (req, res) => {
 });
 
 // PATCH /api/jobs/:id — update selected job fields
-router.patch("/:id", async (req, res) => {
-  const id = Number(req.params.id);
+router.patch(
+  "/:id",
+  authenticateToken,
+  requireRole("admin", "recruiter"),
+  async (req, res) => {
+      const id = Number(req.params.id);
 
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({
@@ -395,5 +408,99 @@ router.patch("/:id", async (req, res) => {
     client?.release();
   }
 });
+
+
+
+/**
+ * DELETE /api/jobs/:id
+ * Permanently deletes a job only if it has no applications.
+ */
+router.delete(
+  "/:id",
+  authenticateToken,
+  requireRole("admin"),
+  async (req, res) => {
+      const id = Number(req.params.id);
+
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return res.status(400).json({
+      error: "Invalid job ID",
+    });
+  }
+
+  let client;
+  let inTransaction = false;
+
+  try {
+    client = await pool.connect();
+
+    await client.query("BEGIN");
+    inTransaction = true;
+
+    const jobResult = await client.query(
+      `SELECT id, title
+       FROM public.jobs
+       WHERE id = $1
+       FOR UPDATE`,
+      [id]
+    );
+
+    if (jobResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      inTransaction = false;
+
+      return res.status(404).json({
+        error: "Job not found",
+      });
+    }
+
+    const applicationResult = await client.query(
+      `SELECT id
+       FROM public.applications
+       WHERE job_id = $1
+       LIMIT 1`,
+      [id]
+    );
+
+    if (applicationResult.rowCount > 0) {
+      await client.query("ROLLBACK");
+      inTransaction = false;
+
+      return res.status(409).json({
+        error: "This job has applications and cannot be deleted. Close the job instead.",
+      });
+    }
+
+    await client.query(
+      `DELETE FROM public.jobs WHERE id = $1`,
+      [id]
+    );
+
+    await client.query("COMMIT");
+    inTransaction = false;
+
+    return res.json({
+      message: "Job deleted successfully",
+      job: jobResult.rows[0],
+    });
+  } catch (error) {
+    if (inTransaction && client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error("Job deletion rollback failed:", rollbackError.message);
+      }
+    }
+
+    console.error("Delete job failed:", error.message);
+
+    return res.status(500).json({
+      error: "Failed to delete job",
+    });
+  } finally {
+    client?.release();
+  }
+});
+
 
 module.exports = router;
