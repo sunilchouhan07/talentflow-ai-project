@@ -59,9 +59,14 @@ async function loadBackendData() {
 
     data.applications = applications;
 
+   
     data.candidates = (candidateResult.candidates || []).map((c) => {
+      const candidateApplications = applications.filter(
+        a => Number(a.candidate_id) === Number(c.id)
+      );
+
       const statusMap = {
-        new: "Applied",
+        new: "New",
         applied: "Applied",
         screening: "Screening",
         shortlisted: "Shortlisted",
@@ -72,11 +77,53 @@ async function loadBackendData() {
         rejected: "Rejected",
       };
 
-      
+      // Derive a display status from the candidate's applications.
+      // Candidates without applications remain New.
+      const applicationStages = candidateApplications.map(
+        a => String(a.stage || "applied").toLowerCase()
+      );
+
+      let displayStage = "New";
+
+      if (applicationStages.length > 0) {
+        // Prefer the furthest progressed application.
+        const stagePriority = {
+          applied: 1,
+          screening: 2,
+          rejected: 3,
+          interview: 4,
+          offer: 5,
+          hired: 6,
+        };
+
+        const highestStage = [...applicationStages].sort(
+          (a, b) => (stagePriority[b] || 0) - (stagePriority[a] || 0)
+        )[0];
+
+        const applicationStatusMap = {
+          applied: "Applied",
+          screening: "Screening",
+          interview: "Interview",
+          offer: "Offer",
+          hired: "Hired",
+          rejected: "Rejected",
+        };
+
+        displayStage = applicationStatusMap[highestStage] || "Applied";
+      } else {
+        // Preserve an existing candidate status only when it is
+        // meaningful and there are no applications.
+        displayStage =
+          statusMap[String(c.status || "new").toLowerCase()] || "New";
+      }
+
+     
       return {
         id: Number(c.id),
         name: c.full_name,
         email: c.email,
+        phone: c.phone || "",
+        skills: Array.isArray(c.skills) ? c.skills : [],
         resumeUrl: c.resume_url || null,
         role: c.applied_role || c.role || "Not specified",
         experience:
@@ -84,12 +131,14 @@ async function loadBackendData() {
             ? "Not specified"
             : `${c.experience_years} years`,
         score: Number(c.match_score ?? 0),
-        stage: statusMap[String(c.status || "new").toLowerCase()] || "Applied",
+        stage: displayStage,
         applied: c.created_at?.slice(0, 10) || "",
+        createdAt: c.created_at || null,
         source: c.source || "Website",
       };
 
     });
+
 
     data.jobs = (jobResult.jobs || []).map((j) => ({
   id: Number(j.id),
@@ -318,26 +367,77 @@ $("logoutButton").onclick = () => {
 }
 function navigate(page){document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));const target=$('page-'+page);if(target)target.classList.add('active');document.querySelectorAll('.nav-item[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));const titles={dashboard:'Recruitment Dashboard',candidates:'Candidates',applications: "Applications",jobs:'Job Openings',interviews:'Scheduled Interviews',pipeline:'Candidate Pipeline',analytics:'Recruitment Analytics',settings:'Settings'};$('pageTitle').textContent=titles[page]||'TalentFlow AI';$('sidebar').classList.remove('open');$('sidebarOverlay').classList.remove('open');renderAll()}
 
-function renderStats(){const c=data.candidates;$('totalCandidates').textContent=c.length;$('shortlistedCandidates').textContent=c.filter(x=>['Shortlisted','Interview','Offer'].includes(x.stage)).length;$('totalInterviews').textContent=data.interviews.length;$('totalHired').textContent=c.filter(x=>x.stage==='Hired').length;$('interviewNavCount').textContent=data.interviews.length}
 
-function renderDashboard() {
-  // 1. Dashboard statistics
-  $("totalCandidates").textContent = data.candidates.length;
+function renderStats() {
+  const candidates = data.candidates || [];
+  const applications = data.applications || [];
+
+  $("totalCandidates").textContent = candidates.length;
+
+  const shortlistedCandidateIds = new Set(
+    applications
+      .filter(a =>
+        ["screening", "interview", "offer"].includes(
+          String(a.stage || "").toLowerCase()
+        )
+      )
+      .map(a => String(a.candidate_id))
+  );
+
+  const hiredCandidateIds = new Set(
+    applications
+      .filter(a =>
+        String(a.stage || "").toLowerCase() === "hired"
+      )
+      .map(a => String(a.candidate_id))
+  );
 
   $("shortlistedCandidates").textContent =
-    data.candidates.filter(c =>
-      String(c.stage || "").toLowerCase() === "shortlisted"
-    ).length;
+    shortlistedCandidateIds.size;
 
   $("totalInterviews").textContent = data.interviews.length;
 
-  $("totalHired").textContent =
-    data.candidates.filter(c =>
-      String(c.stage || "").toLowerCase() === "hired"
-    ).length;
+  $("totalHired").textContent = hiredCandidateIds.size;
+
+  $("interviewNavCount").textContent = data.interviews.length;
+}
+
+
+function renderDashboard() {
+  // 1. Dashboard statistics
+  const candidates = data.candidates || [];
+  const applications = data.applications || [];
+  const interviews = data.interviews || [];
+
+  $("totalCandidates").textContent = candidates.length;
+
+  const shortlistedCandidateIds = new Set(
+    applications
+      .filter(a =>
+        ["screening", "interview", "offer"].includes(
+          String(a.stage || "").toLowerCase()
+        )
+      )
+      .map(a => String(a.candidate_id))
+  );
+
+  $("shortlistedCandidates").textContent =
+    shortlistedCandidateIds.size;
+
+  $("totalInterviews").textContent = interviews.length;
+
+  const hiredCandidateIds = new Set(
+    applications
+      .filter(a =>
+        String(a.stage || "").toLowerCase() === "hired"
+      )
+      .map(a => String(a.candidate_id))
+  );
+
+  $("totalHired").textContent = hiredCandidateIds.size;
 
   // 2. Upcoming interviews
-  const list = data.interviews.slice(0, 4);
+  const list = interviews.slice(0, 4);
 
   $("dashboardInterviews").innerHTML = list.length
     ? list.map(i => `
@@ -353,7 +453,7 @@ function renderDashboard() {
     : '<p class="ai-main-text">No interviews scheduled.</p>';
 
   // 3. Recent candidates
-  $("recentCandidateBody").innerHTML = data.candidates
+  $("recentCandidateBody").innerHTML = candidates
     .slice(0, 5)
     .map(c => `
       <tr>
@@ -383,6 +483,7 @@ function renderDashboard() {
 
   bindCandidateButtons();
 }
+
 
 
 function renderCandidates() {
@@ -435,6 +536,7 @@ function renderCandidates() {
 
 
 
+
 function renderJobs() {
   $("jobsGrid").innerHTML = data.jobs.map(j => `
     <div class="job-card">
@@ -442,70 +544,32 @@ function renderJobs() {
       <h3>${esc(j.title)}</h3>
       <p>${esc(j.location)} · ${esc(j.type)}</p>
 
-      <div class="job-meta">
-        <span class="tag">${j.applicants} applicants</span>
-        <span class="tag">${esc(j.status || "open")}</span>
+      <p>${j.applicants} applicants open</p>
+
+      <div class="job-actions">
+        <button
+          class="link-button"
+          type="button"
+          data-edit-job="${j.id}"
+        >
+          Edit Job
+        </button>
+
+        <button
+          class="danger-button"
+          type="button"
+          data-delete-job="${j.id}"
+        >
+          Delete Job
+        </button>
       </div>
-
-      <button
-        class="link-button"
-        type="button"
-        data-edit-job="${j.id}"
-      >
-        Edit Job
-      </button>
-
-      <button
-        class="danger-button"
-        type="button"
-        data-delete-job="${j.id}"
-      >
-        Delete Job
-      </button>
     </div>
   `).join("");
 
-  document.querySelectorAll("[data-edit-job]").forEach(button => {
-    button.onclick = () => editJob(Number(button.dataset.editJob));
-  });
-
-  document.querySelectorAll("[data-delete-job]").forEach(button => {
-    button.onclick = async () => {
-      const id = Number(button.dataset.deleteJob);
-      const job = data.jobs.find(j => Number(j.id) === id);
-
-      if (!job) {
-        showToast("Job not found");
-        return;
-      }
-
-      const confirmed = window.confirm(
-        `Permanently delete "${job.title}"? Jobs with applications cannot be deleted.`
-      );
-
-      if (!confirmed) return;
-
-      button.disabled = true;
-
-      try {
-        await window.TalentFlowAPI.deleteJob(id);
-
-        showToast("Job deleted successfully");
-
-        // Reload jobs from the backend and refresh the UI.
-        await loadBackendData();
-      }  catch (error) {
-        console.error("Delete job failed:", error);
-
-        showToast(
-          error.message || "Could not delete job. Please try again."
-        );
-      } finally {
-        button.disabled = false;
-      }
-    };
-  });
+  bindJobButtons();
 }
+
+
 
 
 function renderApplications() {
@@ -545,6 +609,18 @@ function renderApplications() {
                     data-save-application="${application.id}">
                     Save Stage
                 </button>
+                <button
+                    class="link-button"
+                    type="button"
+                    data-screen-application="${application.id}">
+                    Screen Resume
+                </button>
+                <button
+                    class="link-button"
+                    type="button"
+                    data-view-evaluation="${application.id}">
+                    View Evaluation
+                </button>
             </td>
         </tr>
     `).join("");
@@ -553,7 +629,18 @@ function renderApplications() {
         button.onclick = () =>
             updateApplicationStage(Number(button.dataset.saveApplication));
     });
+
+    document.querySelectorAll("[data-screen-application]").forEach(button => {
+        button.onclick = () =>
+            screenApplication(Number(button.dataset.screenApplication));
+    });
+
+    document.querySelectorAll("[data-view-evaluation]").forEach(button => {
+        button.onclick = () =>
+            viewEvaluationHistory(Number(button.dataset.viewEvaluation));
+    });
 }
+
 
 async function updateApplicationStage(id) {
     const select = $(`applicationStage-${id}`);
@@ -577,6 +664,143 @@ async function updateApplicationStage(id) {
         showToast(`Could not update stage: ${error.message}`);
         button.disabled = false;
         button.textContent = "Save Stage";
+    }
+}
+
+
+function renderEvaluation(evaluation) {
+    const matched = Array.isArray(evaluation.matched_skills)
+        ? evaluation.matched_skills
+        : [];
+
+    const missing = Array.isArray(evaluation.missing_skills)
+        ? evaluation.missing_skills
+        : [];
+
+    const evidence = Array.isArray(evaluation.evidence)
+        ? evaluation.evidence
+        : [];
+
+    const limitations = Array.isArray(evaluation.limitations)
+        ? evaluation.limitations
+        : [];
+
+    const safeList = (items) => items.length
+        ? `<ul>${items.map(item => `<li>${esc(item)}</li>`).join("")}</ul>`
+        : "<p>None reported.</p>";
+
+    openModal(
+        "AI RESUME SCREENING",
+        `Evaluation #${evaluation.id}`,
+        `
+            <div class="modal-form">
+              <div class="evaluation-score">                    <h3>Match Score</h3>
+                    <p><strong>${Number(evaluation.match_score).toFixed(0)}/100</strong></p>
+                    <p>${esc(evaluation.summary || "No summary available.")}</p>
+                    <p><small>Advisory assessment only. Review the evidence before making hiring decisions.</small></p>
+                </div>
+
+                <div>
+                    <h3>Matched Skills</h3>
+                    ${safeList(matched)}
+                </div>
+
+                <div>
+                    <h3>Missing or Unconfirmed Skills</h3>
+                    ${safeList(missing)}
+                </div>
+
+                <div>
+                    <h3>Evidence</h3>
+
+                    ${evidence.length ? `
+                        <div class="evaluation-evidence-list">
+                            ${evidence.map(item => {
+                                const assessment = String(
+                                    item.assessment || "not_evidenced"
+                                ).toLowerCase();
+
+                                const label = {
+                                    match: "Match",
+                                    partial_match: "Partial match",
+                                    not_evidenced: "Not evidenced"
+                                }[assessment] || assessment.replace(/_/g, " ");
+
+                                return `
+                                    <div class="evaluation-evidence-card">
+                                        <div class="evaluation-evidence-heading">
+                                            <strong>${esc(item.requirement || "Requirement")}</strong>
+                                            <span class="evaluation-evidence-status status-${esc(assessment)}">
+                                                ${esc(label)}
+                                            </span>
+                                        </div>
+
+                                        <p>${esc(
+                                            item.resume_evidence ||
+                                            "No supporting resume evidence provided."
+                                        )}</p>
+                                    </div>
+                                `;
+                            }).join("")}
+                        </div>
+                    ` : "<p>No evidence items returned.</p>"}
+                </div>
+
+
+                <div>
+                    <h3>Limitations</h3>
+                    ${safeList(limitations)}
+                </div>
+
+                <p><small>Model: ${esc(evaluation.model_name || "Unknown")} · Created: ${esc(evaluation.created_at || "Unknown")}</small></p>
+            </div>
+        `
+    );
+}
+
+async function screenApplication(applicationId) {
+    const button = document.querySelector(
+        `[data-screen-application="${applicationId}"]`
+    );
+
+    if (!button) return;
+
+    button.disabled = true;
+    button.textContent = "Screening...";
+
+    try {
+        const result =
+            await window.TalentFlowAPI.screenApplication(applicationId);
+
+        if (!result.evaluation) {
+            throw new Error("The server did not return a saved evaluation.");
+        }
+
+        renderEvaluation(result.evaluation);
+        showToast("AI assessment saved successfully.");
+    } catch (error) {
+        console.error("AI screening failed:", error);
+        showToast(`Could not screen resume: ${error.message}`);
+    } finally {
+        button.disabled = false;
+        button.textContent = "Screen Resume";
+    }
+}
+
+async function viewEvaluationHistory(applicationId) {
+    try {
+        const result =
+            await window.TalentFlowAPI.getEvaluationHistory(applicationId);
+
+        if (!result.evaluations || result.evaluations.length === 0) {
+            showToast("No saved evaluations for this application.");
+            return;
+        }
+
+        renderEvaluation(result.evaluations[0]);
+    } catch (error) {
+        console.error("Evaluation history failed:", error);
+        showToast(`Could not load evaluation: ${error.message}`);
     }
 }
 
@@ -684,6 +908,45 @@ async function editJob(id) {
 }
 
 
+function bindJobButtons() {
+  document.querySelectorAll("[data-edit-job]").forEach((button) => {
+    button.onclick = () => {
+      editJob(Number(button.dataset.editJob));
+    };
+  });
+
+  document.querySelectorAll("[data-delete-job]").forEach((button) => {
+    button.onclick = async () => {
+      const id = Number(button.dataset.deleteJob);
+      const job = data.jobs.find((item) => item.id === id);
+
+      if (!job) {
+        showToast("Job not found.");
+        return;
+      }
+
+      if (!window.confirm(`Delete "${job.title}"?`)) {
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = "Deleting...";
+
+      try {
+        await window.TalentFlowAPI.deleteJob(id);
+        await loadBackendData();
+        showToast("Job deleted successfully!");
+      } catch (error) {
+        console.error("Failed to delete job:", error);
+        showToast(`Could not delete job: ${error.message}`);
+        button.disabled = false;
+        button.textContent = "Delete Job";
+      }
+    };
+  });
+}
+
+
 function renderInterviews() {
     const now = new Date();
     const today = now.toLocaleDateString("en-CA");
@@ -739,8 +1002,123 @@ function renderInterviews() {
     });
 }
 
-function renderPipeline(){const stages=['Applied','Screening','Shortlisted','Interview','Offer','Hired'];$('pipelineBoard').innerHTML=stages.map(s=>`<div class="pipeline-column"><h4>${s} <span class="pipeline-count">(${data.candidates.filter(c=>c.stage===s).length})</span></h4>${data.candidates.filter(c=>c.stage===s).map(c=>`<div class="pipeline-card"><strong>${esc(c.name)}</strong><span>${esc(c.role)}</span><span>AI Match ${c.score}%</span></div>`).join('')||'<span class="pipeline-count">No candidates</span>'}</div>`).join('')}
-function renderAnalytics(){const stages=['Applied','Screening','Shortlisted','Interview','Offer','Hired'];$('funnelChart').innerHTML=stages.map(s=>{const n=data.candidates.filter(c=>c.stage===s).length;const pct=data.candidates.length?Math.round(n/data.candidates.length*100):0;return `<div class="chart-row"><span class="chart-label">${s}</span><div class="chart-bar"><div class="chart-fill" style="width:${pct}%"></div></div><span class="chart-value">${n}</span></div>`}).join('');const sources={};data.candidates.forEach(c=>sources[c.source]=(sources[c.source]||0)+1);$('sourceChart').innerHTML=Object.entries(sources).map(([s,n])=>{const pct=Math.round(n/data.candidates.length*100);return `<div class="chart-row"><span class="chart-label">${esc(s)}</span><div class="chart-bar"><div class="chart-fill" style="width:${pct}%"></div></div><span class="chart-value">${n}</span></div>`}).join('')||'<p class="ai-main-text">No source data yet.</p>'}
+
+function renderPipeline() {
+  const stages = [
+    { value: "applied", label: "Applied" },
+    { value: "screening", label: "Screening" },
+    { value: "interview", label: "Interview" },
+    { value: "offer", label: "Offer" },
+    { value: "hired", label: "Hired" },
+    { value: "rejected", label: "Rejected" },
+  ];
+
+  const applications = data.applications || [];
+  const jobsById = new Map(
+    data.jobs.map(job => [Number(job.id), job])
+  );
+
+  $("pipelineBoard").innerHTML = stages.map(stage => {
+    const items = applications.filter(
+      application =>
+        String(application.stage || "applied").toLowerCase() ===
+        stage.value
+    );
+
+    return `
+      <div class="pipeline-column">
+        <h4>
+          ${stage.label}
+          <span class="pipeline-count">(${items.length})</span>
+        </h4>
+
+        ${
+          items.length
+            ? items.map(application => {
+                const job = jobsById.get(Number(application.job_id));
+                const candidateName =
+                  application.candidate_name || "Candidate";
+                const jobTitle =
+                  application.job_title || job?.title || "Job not found";
+
+                return `
+                  <div class="pipeline-card">
+                    <strong>${esc(candidateName)}</strong>
+                    <span>${esc(jobTitle)}</span>
+                    <span>Application #${Number(application.id)}</span>
+                  </div>
+                `;
+              }).join("")
+            : '<span class="pipeline-count">No applications</span>'
+        }
+      </div>
+    `;
+  }).join("");
+}
+
+
+function renderAnalytics() {
+  const stages = [
+    { value: "applied", label: "Applied" },
+    { value: "screening", label: "Screening" },
+    { value: "interview", label: "Interview" },
+    { value: "offer", label: "Offer" },
+    { value: "hired", label: "Hired" },
+    { value: "rejected", label: "Rejected" },
+  ];
+
+  const applications = data.applications || [];
+  const totalApplications = applications.length;
+
+  $("funnelChart").innerHTML = stages.map(stage => {
+    const count = applications.filter(
+      application =>
+        String(application.stage || "applied").toLowerCase() ===
+        stage.value
+    ).length;
+
+    const percentage = totalApplications
+      ? Math.round((count / totalApplications) * 100)
+      : 0;
+
+    return `
+      <div class="chart-row">
+        <span class="chart-label">${stage.label}</span>
+        <div class="chart-bar">
+          <div class="chart-fill" style="width:${percentage}%"></div>
+        </div>
+        <span class="chart-value">${count}</span>
+      </div>
+    `;
+  }).join("");
+
+  const sources = {};
+  data.candidates.forEach(candidate => {
+    const source = candidate.source || "Unknown";
+    sources[source] = (sources[source] || 0) + 1;
+  });
+
+  const totalCandidates = data.candidates.length;
+
+  $("sourceChart").innerHTML = Object.entries(sources)
+    .map(([source, count]) => {
+      const percentage = totalCandidates
+        ? Math.round((count / totalCandidates) * 100)
+        : 0;
+
+      return `
+        <div class="chart-row">
+          <span class="chart-label">${esc(source)}</span>
+          <div class="chart-bar">
+            <div class="chart-fill" style="width:${percentage}%"></div>
+          </div>
+          <span class="chart-value">${count}</span>
+        </div>
+      `;
+    })
+    .join("") || '<p class="ai-main-text">No source data yet.</p>';
+}
+
 function renderSettings(){$('settingAI').checked=data.settings.ai;$('settingNotifications').checked=data.settings.notifications;$('settingCompact').checked=data.settings.compact;document.body.classList.toggle('compact-tables',data.settings.compact)}
 function renderAll(){renderStats();renderDashboard();populateRoleFilter();renderCandidates();renderJobs();renderApplications();renderInterviews();renderPipeline();renderAnalytics();renderSettings()}
 function populateRoleFilter(){const select=$('candidateRoleFilter'),value=select.value,roles=[...new Set(data.candidates.map(c=>c.role))];select.innerHTML='<option value="all">All positions</option>'+roles.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');select.value=roles.includes(value)?value:'all'}
@@ -787,8 +1165,9 @@ function bindCandidateButtons() {
 
 
 
+
 async function openCandidate(id) {
-  const c = data.candidates.find(x => x.id === id);
+  const c = data.candidates.find(x => String(x.id) === String(id));
   if (!c) return;
 
   const experienceValue = Number.parseFloat(c.experience);
@@ -802,12 +1181,14 @@ async function openCandidate(id) {
     `
       <div>
         <h3>${esc(c.name)}</h3>
-        <p class="ai-main-text">${esc(c.email)} · ${esc(c.experience)}</p>
+        <p class="ai-main-text">
+          ${esc(c.email)} · ${esc(c.experience)}
+        </p>
 
         <div class="job-meta">
           <span class="tag">${esc(c.role)}</span>
           <span class="tag">AI Match ${c.score}%</span>
-          <span class="tag">${esc(c.stage)}</span>
+          <span class="tag">${esc(c.stage || "New")}</span>
         </div>
 
         <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
@@ -817,111 +1198,129 @@ async function openCandidate(id) {
         <form class="modal-form" id="editCandidateForm">
           <div>
             <label for="editCandidateName">Full name</label>
-            <input id="editCandidateName" value="${esc(c.name)}" required>
+            <input
+              id="editCandidateName"
+              value="${esc(c.name)}"
+              required
+            >
           </div>
 
           <div>
             <label for="editCandidateEmail">Email</label>
-            <input id="editCandidateEmail" type="email"
-              value="${esc(c.email)}" required>
+            <input
+              id="editCandidateEmail"
+              type="email"
+              value="${esc(c.email)}"
+              required
+            >
           </div>
 
           <div>
             <label for="editCandidatePhone">Phone</label>
-            <input id="editCandidatePhone" type="tel"
-              value="${esc(c.phone || "")}">
+            <input
+              id="editCandidatePhone"
+              type="tel"
+              value="${esc(c.phone || "")}"
+            >
           </div>
 
           <div>
             <label for="editCandidateRole">Applied role</label>
-            <input id="editCandidateRole" value="${esc(c.role === "Not specified" ? "" : c.role)}" required>
+            <input
+              id="editCandidateRole"
+              value="${esc(c.role === "Not specified" ? "" : c.role)}"
+              required
+            >
           </div>
 
           <div>
             <label for="editCandidateExperience">Experience (years)</label>
-            <input id="editCandidateExperience" type="number"
-              min="0" max="999.9" step="0.1"
-              value="${experience}" required>
+            <input
+              id="editCandidateExperience"
+              type="number"
+              min="0"
+              max="999.9"
+              step="0.1"
+              value="${experience}"
+              required
+            >
           </div>
 
           <div>
             <label for="editCandidateSkills">Skills (comma-separated)</label>
-            <input id="editCandidateSkills"
+            <input
+              id="editCandidateSkills"
               value="${esc((c.skills || []).join(", "))}"
-              placeholder="AWS, Linux, Python">
+              placeholder="AWS, Linux, Python"
+            >
           </div>
 
-          <button class="primary-button" id="saveCandidateProfile" type="submit">
+          <button
+            class="primary-button"
+            id="saveCandidateProfile"
+            type="submit"
+          >
             Save Profile
           </button>
         </form>
 
-        
-        ${c.resumeUrl ? `
-          <button
-            class="primary-button"
-            type="button"
-            id="downloadCandidateResume"
-          >
-            Download Resume
-          </button>
-        ` : `
-          <p class="ai-main-text">No resume uploaded for this candidate.</p>
-        `}
-
-
-        <hr style="border:0;border-top:1px solid var(--line);margin:20px 0">
-
-        <label for="candidateStageEdit">Update hiring stage</label>
-        <select id="candidateStageEdit" class="form-control">
-          ${["Applied", "Screening", "Shortlisted", "Interview", "Offer", "Hired", "Rejected"]
-            .map(stage => `<option ${stage === c.stage ? "selected" : ""}>${stage}</option>`)
-            .join("")}
-        </select>
-
-        <button class="primary-button" id="saveCandidateStage"
-          type="button" style="margin-top:14px">
-          Save Stage
-        </button>
+        ${
+          c.resumeUrl
+            ? `
+              <div style="margin-top: 16px;">
+                <button
+                  class="primary-button"
+                  type="button"
+                  id="downloadCandidateResume"
+                >
+                  Download Resume
+                </button>
+              </div>
+            `
+            : `
+              <p class="ai-main-text">
+                No resume uploaded for this candidate.
+              </p>
+            `
+        }
       </div>
     `
   );
 
+  // Download candidate resume
+  const downloadButton = $("downloadCandidateResume");
 
-  
-const downloadButton = $("downloadCandidateResume");
+  if (downloadButton) {
+    downloadButton.onclick = async () => {
+      const downloadTab = window.open("about:blank", "_blank");
 
-if (downloadButton) {
-  downloadButton.onclick = async () => {
-    const downloadTab = window.open("about:blank", "_blank");
+      downloadButton.disabled = true;
+      downloadButton.textContent = "Preparing download...";
 
-    downloadButton.disabled = true;
-    downloadButton.textContent = "Preparing download...";
+      try {
+        const result =
+          await window.TalentFlowAPI.getCandidateResume(id);
 
-    try {
-      const result =
-        await window.TalentFlowAPI.getCandidateResume(id);
+        if (!result.downloadUrl) {
+          throw new Error("Download URL was not returned");
+        }
 
-      if (!result.downloadUrl) {
-        throw new Error("Download URL was not returned");
+        if (downloadTab) {
+          downloadTab.location.href = result.downloadUrl;
+        } else {
+          window.location.href = result.downloadUrl;
+        }
+      } catch (error) {
+        if (downloadTab) downloadTab.close();
+
+        console.error("Resume download failed:", error);
+        showToast(`Could not download resume: ${error.message}`);
+      } finally {
+        downloadButton.disabled = false;
+        downloadButton.textContent = "Download Resume";
       }
-
-      if (downloadTab) {
-        downloadTab.location.href = result.downloadUrl;
-      } else {
-        window.location.href = result.downloadUrl;
-      }
-    } catch (error) {
-      if (downloadTab) downloadTab.close();
-
-      console.error("Resume download failed:", error);
-      showToast(`Could not download resume: ${error.message}`);
-    } finally {
-      downloadButton.disabled = false;
-      downloadButton.textContent = "Download Resume";
-    }
-  };
-}
+    };
+  }
 
   // Save candidate profile
   $("editCandidateForm").onsubmit = async (e) => {
@@ -937,7 +1336,9 @@ if (downloadButton) {
         email: $("editCandidateEmail").value.trim(),
         phone: $("editCandidatePhone").value.trim() || null,
         applied_role: $("editCandidateRole").value.trim(),
-        experience_years: Number($("editCandidateExperience").value),
+        experience_years: Number(
+          $("editCandidateExperience").value
+        ),
         skills: $("editCandidateSkills").value
           .split(",")
           .map(skill => skill.trim())
@@ -952,33 +1353,13 @@ if (downloadButton) {
     } catch (error) {
       console.error("Failed to update candidate profile:", error);
       showToast(`Could not save profile: ${error.message}`);
+
       button.disabled = false;
       button.textContent = "Save Profile";
     }
   };
-
-  // Save hiring stage (existing backend functionality)
-  $("saveCandidateStage").onclick = async () => {
-    const button = $("saveCandidateStage");
-    const selectedStage = $("candidateStageEdit").value;
-
-    button.disabled = true;
-    button.textContent = "Saving...";
-
-    try {
-      await window.TalentFlowAPI.updateCandidateStatus(c.id, selectedStage);
-      await loadBackendData();
-
-      closeModal();
-      showToast("Candidate stage saved to PostgreSQL!");
-    } catch (error) {
-      console.error("Failed to update candidate stage:", error);
-      showToast(`Could not update stage: ${error.message}`);
-      button.disabled = false;
-      button.textContent = "Save Stage";
-    }
-  };
 }
+
 
 function openInterview(id) {
     const interview = data.interviews.find(item => item.id === id);
@@ -1105,9 +1486,31 @@ function addCandidate() {
       </div>
 
       <div>
+        <label for="newSkills">Skills</label>
+        <input
+          id="newSkills"
+          type="text"
+          placeholder="AWS, Linux, Python, Docker, Terraform"
+        >
+        <small>Enter skills separated by commas.</small>
+      </div>
+
+      <div>
         <label for="newEmail">Email</label>
         <input type="email" id="newEmail" required>
       </div>
+
+      
+      <div>
+        <label for="newPhone">Phone</label>
+        <input
+          id="newPhone"
+          type="tel"
+          placeholder="Enter phone number"
+          maxlength="30"
+        >
+      </div>
+
 
       <div>
         <label for="newRole">Position</label>
@@ -1180,6 +1583,10 @@ function addCandidate() {
         experience_years: Number($("newExperience").value),
         status: "new",
         source: "Website",
+        skills: $("newSkills").value
+          .split(",")
+          .map(skill => skill.trim())
+          .filter(Boolean),
         resume,
       });
 

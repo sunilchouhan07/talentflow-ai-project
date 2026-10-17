@@ -194,6 +194,17 @@ getAIInsights: () =>
 
   // Applications
   getApplications: () => apiRequest("/applications"),
+  
+  // AI Resume Screening
+  screenApplication: (applicationId) =>
+    apiRequest(`/ai/screen/${applicationId}`, {
+      method: "POST",
+      body: JSON.stringify({})
+    }),
+
+  getEvaluationHistory: (applicationId) =>
+    apiRequest(`/ai/evaluations/${applicationId}`),
+
 
   createApplication: (application) =>
     apiRequest("/applications", {

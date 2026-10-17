@@ -106,13 +106,26 @@ function validateCandidateFields(body, { partial = false } = {}) {
     return "phone must be a string";
   }
 
+  if (body.skills !== undefined) {
+  let candidateSkills = body.skills;
+
+  if (typeof candidateSkills === "string") {
+    try {
+      candidateSkills = JSON.parse(candidateSkills);
+    } catch {
+      return "skills must be a valid array of strings";
+    }
+  }
+
   if (
-    body.skills !== undefined &&
-    (!Array.isArray(body.skills) ||
-      !body.skills.every((skill) => typeof skill === "string"))
+    !Array.isArray(candidateSkills) ||
+    !candidateSkills.every(
+      (skill) => typeof skill === "string"
+    )
   ) {
     return "skills must be an array of strings";
   }
+}
 
   if (
     body.experience_years !== undefined &&
@@ -161,13 +174,37 @@ function validateCandidateFields(body, { partial = false } = {}) {
 }
 
 // Find the latest open job matching the candidate's role.
+// async function getMatchScore(client, role, skills, lockJob = false) {
+//   if (!role) {
+//     return 0;
+//   }
+
+//   const result = await client.query(
+//     `SELECT requirements
+//      FROM public.jobs
+//      WHERE LOWER(TRIM(title)) = LOWER(TRIM($1))
+//        AND status = 'open'
+//      ORDER BY created_at DESC
+//      LIMIT 1
+//      ${lockJob ? "FOR SHARE" : ""}`,
+//     [role]
+//   );
+
+//   if (result.rowCount === 0) {
+//     return 0;
+//   }
+
+//   return calculateMatchScore(skills, result.rows[0].requirements);
+// }
+
 async function getMatchScore(client, role, skills, lockJob = false) {
   if (!role) {
+    console.log("[MatchScore] Missing candidate role");
     return 0;
   }
 
   const result = await client.query(
-    `SELECT requirements
+    `SELECT id, title, requirements, status
      FROM public.jobs
      WHERE LOWER(TRIM(title)) = LOWER(TRIM($1))
        AND status = 'open'
@@ -177,12 +214,24 @@ async function getMatchScore(client, role, skills, lockJob = false) {
     [role]
   );
 
+  console.log("[MatchScore] Role:", role);
+  console.log("[MatchScore] Candidate skills:", skills);
+  console.log("[MatchScore] Matching jobs:", result.rows);
+
   if (result.rowCount === 0) {
+    console.log("[MatchScore] No matching open job found");
     return 0;
   }
 
-  return calculateMatchScore(skills, result.rows[0].requirements);
+  const score = calculateMatchScore(
+    skills,
+    result.rows[0].requirements
+  );
+
+  console.log("[MatchScore] Calculated score:", score);
+  return score;
 }
+
 
 // GET /api/candidates
 
@@ -320,9 +369,34 @@ router.post(
       status,
     } = body;
 
-    const candidateSkills = Array.isArray(skills)
-      ? skills.map((skill) => skill.trim())
-      : [];
+    let candidateSkills;
+
+    try {
+      candidateSkills = Array.isArray(skills)
+        ? skills
+        : typeof skills === "string"
+          ? JSON.parse(skills)
+          : [];
+
+      if (
+        !Array.isArray(candidateSkills) ||
+        !candidateSkills.every(
+          (skill) => typeof skill === "string"
+        )
+      ) {
+        return res.status(400).json({
+          error: "Skills must be an array of strings.",
+        });
+      }
+
+      candidateSkills = candidateSkills
+        .map((skill) => skill.trim())
+        .filter(Boolean);
+    } catch {
+      return res.status(400).json({
+        error: "Skills must be a valid array of strings.",
+      });
+    }
 
     const role = applied_role?.trim() || null;
 

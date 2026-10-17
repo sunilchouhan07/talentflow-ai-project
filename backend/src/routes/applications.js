@@ -3,6 +3,7 @@ const express = require("express");
 const pool = require("../config/db");
 const { authenticateToken, requireRole } = require("../middleware/auth");
 const router = express.Router();
+const { calculateMatchScore } = require("../utils/matchScore");
 
 const validStages = [
   "applied",
@@ -40,7 +41,13 @@ router.get("/", authenticateToken, async (req, res) => {
 
     return res.json({
       count: result.rowCount,
-      applications: result.rows,
+      applications: result.rows.map((application) => ({
+        ...application,
+        match_score: calculateMatchScore(
+          application.candidate_skills,
+          application.job_requirements
+        ),
+      })),
     });
   } catch (error) {
     console.error("Fetch applications failed:", error.message);
