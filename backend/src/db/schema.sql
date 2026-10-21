@@ -49,11 +49,31 @@ CREATE TABLE IF NOT EXISTS public.candidates (
 );
 
 -- Migrate existing candidate tables without deleting data.
+
 ALTER TABLE public.candidates
     ADD COLUMN IF NOT EXISTS applied_role VARCHAR(150);
 
 ALTER TABLE public.candidates
     ADD COLUMN IF NOT EXISTS match_score NUMERIC(5,2) NOT NULL DEFAULT 0;
+
+
+
+-- Resume processing metadata
+ALTER TABLE public.candidates
+    ADD COLUMN IF NOT EXISTS resume_processing_status VARCHAR(20)
+    NOT NULL DEFAULT 'pending'
+    CHECK (
+        resume_processing_status IN (
+            'pending', 'processing', 'completed', 'failed'
+        )
+    );
+
+ALTER TABLE public.candidates
+    ADD COLUMN IF NOT EXISTS resume_text TEXT;
+
+ALTER TABLE public.candidates
+    ADD COLUMN IF NOT EXISTS resume_processed_at TIMESTAMPTZ;
+
 
 -- Align the candidate status constraint with the application.
 ALTER TABLE public.candidates
